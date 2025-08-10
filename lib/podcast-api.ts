@@ -23,8 +23,9 @@ export type ResultResponse = {
   notesUrl?: string
   durationSeconds?: number
   metrics?: {
-    lufs?: number
     sourcesKept?: number
+    sources?: Array<{ title: string; url: string }>
+    lufs?: number
     ttsSeconds?: number
     runtimeSeconds?: number
   }
@@ -222,8 +223,13 @@ function createMockApi(): ApiClient {
         notesUrl: "https://example.com",
         durationSeconds: 60 * 10,
         metrics: {
+          sourcesKept: 3,
+          sources: [
+            { title: "TechCrunch - Latest AI developments", url: "https://techcrunch.com/ai" },
+            { title: "MIT Technology Review - AI Safety Report", url: "https://technologyreview.com/ai-safety" },
+            { title: "OpenAI Blog - Recent Updates", url: "https://openai.com/blog" },
+          ],
           lufs: -16,
-          sourcesKept: 7,
           ttsSeconds: 42,
           runtimeSeconds: Math.floor((Date.now() - job.createdAt) / 1000),
         },

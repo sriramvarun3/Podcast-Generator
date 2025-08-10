@@ -48,6 +48,7 @@ const STAGES: string[] = [
   "Sharpening pencils…",
   "Picking the best news from the web",
   "Skimming so you don’t have to",
+  "Skimming so you don’t have to",
   "Checking what the hotshots have to say about this",
   "Connecting the dots",
   "Adding dramatic pauses (tastefully)",
@@ -63,7 +64,7 @@ export default function Page() {
 
   // Config toggles
   const [mockMode, setMockMode] = useState<boolean>(true)
-  const [notesInModal, setNotesInModal] = useState<boolean>(true)
+  const [notesOpen, setNotesOpen] = useState<boolean>(false)
 
   // Form
   const [topic, setTopic] = useState<string>("")
@@ -80,7 +81,6 @@ export default function Page() {
 
   // Dialogs
   const [confirmCancelOpen, setConfirmCancelOpen] = useState<boolean>(false)
-  const [notesOpen, setNotesOpen] = useState<boolean>(false)
 
   // polling
   const pollTimer = useRef<number | null>(null)
@@ -151,6 +151,16 @@ export default function Page() {
   )
 
   const onGenerate = useCallback(async () => {
+    // Add topic validation
+    if (!topic.trim()) {
+      toast({
+        title: "Topic required",
+        description: "Please enter a topic before generating your podcast.",
+        variant: "destructive",
+      })
+      return
+    }
+
     setState("running")
     setErrorMessage(null)
     setResult(null)
@@ -230,17 +240,6 @@ export default function Page() {
                   Mock backend mode
                 </Label>
               </div>
-              <div className="flex items-center gap-2">
-                <Switch
-                  id="notes-in-modal"
-                  checked={notesInModal}
-                  onCheckedChange={(v) => setNotesInModal(Boolean(v))}
-                  aria-label="Toggle notes modal"
-                />
-                <Label htmlFor="notes-in-modal" className="cursor-pointer">
-                  Open notes in a modal
-                </Label>
-              </div>
             </div>
           </CardHeader>
 
@@ -267,7 +266,6 @@ export default function Page() {
             {state === "success" && result && (
               <ResultView
                 result={result}
-                notesInModal={notesInModal}
                 notesOpen={notesOpen}
                 setNotesOpen={setNotesOpen}
                 onCopy={copyToClipboard}
@@ -278,10 +276,7 @@ export default function Page() {
             {state === "error" && <ErrorView message={errorMessage || "Something went wrong."} onReset={resetAll} />}
           </CardContent>
 
-          <CardFooter className="justify-between">
-            <div className="text-sm text-muted-foreground">
-              Built with the Next.js App Router and client-side data fetching. [^1]
-            </div>
+          <CardFooter className="justify-end">
             {state !== "idle" && (
               <Button
                 variant="ghost"
@@ -457,13 +452,12 @@ function ProgressView(props: {
 
 function ResultView(props: {
   result: ResultResponse
-  notesInModal: boolean
   notesOpen: boolean
   setNotesOpen: (v: boolean) => void
   onCopy: (t: string) => void
   onReset: () => void
 }) {
-  const { result, notesInModal, notesOpen, setNotesOpen, onCopy, onReset } = props
+  const { result, notesOpen, setNotesOpen, onCopy, onReset } = props
   const { title, mp3Url, notesUrl, metrics } = result
 
   return (
@@ -488,79 +482,51 @@ function ResultView(props: {
         )}
         <div className="flex flex-wrap items-center gap-2">
           {mp3Url && (
-            <>
-              <a
-                href={mp3Url}
-                download
-                className={cn(
-                  "inline-flex items-center gap-2 rounded-md border px-3 py-2 text-sm font-medium",
-                  "hover:bg-muted/50",
-                )}
-              >
-                <Download className="size-4" />
-                Download MP3
-              </a>
-              <Button variant="ghost" size="sm" className="gap-2" onClick={() => onCopy(mp3Url)}>
-                <Clipboard className="size-4" />
-                Copy MP3 link
-              </Button>
-            </>
+            <a
+              href={mp3Url}
+              download
+              className={cn(
+                "inline-flex items-center gap-2 rounded-md border px-3 py-2 text-sm font-medium",
+                "hover:bg-muted/50",
+              )}
+            >
+              <Download className="size-4" />
+              Download MP3
+            </a>
           )}
           {notesUrl && (
             <>
-              {notesInModal ? (
-                <>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="gap-2 bg-transparent"
-                    onClick={() => setNotesOpen(true)}
-                  >
-                    <FileText className="size-4" />
-                    View notes
-                  </Button>
-                  <Dialog open={notesOpen} onOpenChange={setNotesOpen}>
-                    <DialogContent className="max-w-3xl">
-                      <DialogHeader>
-                        <DialogTitle>Show Notes</DialogTitle>
-                        <DialogDescription>Source links and summary</DialogDescription>
-                      </DialogHeader>
-                      <div className="aspect-[4/3] w-full overflow-hidden rounded-md border">
-                        <iframe
-                          title="Show notes"
-                          src={notesUrl}
-                          className="h-full w-full"
-                          sandbox="allow-same-origin allow-popups allow-forms allow-scripts"
-                        />
-                      </div>
-                      <DialogFooter className="justify-between sm:justify-between">
-                        <a
-                          href={notesUrl}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="text-sm underline underline-offset-4 text-muted-foreground"
-                        >
-                          Open in new tab
-                        </a>
-                        <Button onClick={() => setNotesOpen(false)}>Close</Button>
-                      </DialogFooter>
-                    </DialogContent>
-                  </Dialog>
-                </>
-              ) : (
-                <a
-                  href={notesUrl}
-                  target="_blank"
-                  rel="noreferrer"
-                  className={cn(
-                    "inline-flex items-center gap-2 rounded-md border px-3 py-2 text-sm font-medium",
-                    "hover:bg-muted/50",
-                  )}
-                >
-                  <FileText className="size-4" />
-                  View notes
-                </a>
-              )}
+              <Button variant="outline" size="sm" className="gap-2 bg-transparent" onClick={() => setNotesOpen(true)}>
+                <FileText className="size-4" />
+                View notes
+              </Button>
+              <Dialog open={notesOpen} onOpenChange={setNotesOpen}>
+                <DialogContent className="max-w-3xl">
+                  <DialogHeader>
+                    <DialogTitle>Show Notes</DialogTitle>
+                    <DialogDescription>Source links and summary</DialogDescription>
+                  </DialogHeader>
+                  <div className="aspect-[4/3] w-full overflow-hidden rounded-md border">
+                    <iframe
+                      title="Show notes"
+                      src={notesUrl}
+                      className="h-full w-full"
+                      sandbox="allow-same-origin allow-popups allow-forms allow-scripts"
+                    />
+                  </div>
+                  <DialogFooter className="justify-between sm:justify-between">
+                    <a
+                      href={notesUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="text-sm underline underline-offset-4 text-muted-foreground"
+                    >
+                      Open in new tab
+                    </a>
+                    <Button onClick={() => setNotesOpen(false)}>Close</Button>
+                  </DialogFooter>
+                </DialogContent>
+              </Dialog>
               <Button variant="ghost" size="sm" className="gap-2" onClick={() => onCopy(notesUrl!)}>
                 <Clipboard className="size-4" />
                 Copy notes link
@@ -574,20 +540,33 @@ function ResultView(props: {
         </div>
       </div>
 
+      {metrics?.sources && metrics.sources.length > 0 && (
+        <div className="grid gap-3">
+          <div className="text-sm font-medium">Sources used:</div>
+          <ol className="list-decimal list-inside space-y-1 text-sm">
+            {metrics.sources.map((source, idx) => (
+              <li key={idx}>
+                <a
+                  href={source.url}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="text-blue-600 hover:text-blue-800 underline underline-offset-2"
+                >
+                  {source.title}
+                </a>
+              </li>
+            ))}
+          </ol>
+        </div>
+      )}
+
       {metrics && (
         <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
           {typeof metrics.durationSeconds === "number" && (
             <MetricPill label="Duration" value={formatSeconds(metrics.durationSeconds)} />
           )}
-          {typeof metrics.lufs === "number" && <MetricPill label="LUFS" value={`${metrics.lufs.toFixed(1)}`} />}
           {typeof metrics.sourcesKept === "number" && (
-            <MetricPill label="Sources kept" value={`${metrics.sourcesKept}`} />
-          )}
-          {typeof metrics.ttsSeconds === "number" && (
-            <MetricPill label="TTS time" value={formatSeconds(metrics.ttsSeconds)} />
-          )}
-          {typeof metrics.runtimeSeconds === "number" && (
-            <MetricPill label="Runtime" value={formatSeconds(metrics.runtimeSeconds)} />
+            <MetricPill label="Sources used" value={`${metrics.sourcesKept}`} />
           )}
         </div>
       )}
