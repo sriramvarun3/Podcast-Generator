@@ -1,251 +1,213 @@
 "use client"
 
-const BASE_URL = process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:8000"
-
-export type GenerateBody = {
-  topic: string
-  description: string
-  tone: "funny" | "factual" | "serious" | "humorous" | "neutral"
-  length: 5 | 10 | 15
+interface PodcastRequest {
+  topic: string;
 }
 
-export type ProgressResponse = {
-  stage: number
-  message: string
-  percent: number
-  log: string[]
-}
-
-export type ResultResponse = {
-  status: "ready" | "error" | "running"
-  title?: string
-  mp3Url?: string
-  notesUrl?: string
-  durationSeconds?: number
+interface ResultResponse {
+  id: string;
+  topic: string;
+  status: 'pending' | 'processing' | 'completed' | 'failed' | 'unknown';
+  progress: number;
+  audio_url?: string | null;
+  transcript?: string | null;
   metrics?: {
-    sourcesKept?: number
-    sources?: Array<{ title: string; url: string }>
-    lufs?: number
-    ttsSeconds?: number
-    runtimeSeconds?: number
-  }
-  error?: string
+    duration_seconds?: number;
+    word_count?: number;
+    average_speaking_rate?: number;
+  } | null;
+  error?: string | null;
+  created_at: string;
+  completed_at?: string | null;
 }
 
-type ApiClient = {
-  generate: (body: GenerateBody) => Promise<{ jobId: string }>
-  getProgress: (jobId: string) => Promise<ProgressResponse>
-  getResult: (jobId: string) => Promise<ResultResponse>
-  cancel: (jobId: string) => Promise<{ ok: true }>
+interface GenerateResponse {
+  id: string;
 }
 
-export function createPodcastApi(opts?: { mock?: boolean }): ApiClient {
-  if (opts?.mock) return createMockApi()
-  return createHttpApi()
+interface PodcastApi {
+  generate: (request: PodcastRequest) => Promise<GenerateResponse>;
+  getResult: (id: string) => Promise<ResultResponse>;
 }
 
-// HTTP client with timeout and friendly errors
-function createHttpApi(): ApiClient {
-  const fetchWithTimeout = async (url: string, init?: RequestInit, timeoutMs = 15000) => {
-    const ctrl = new AbortController()
-    const id = setTimeout(() => ctrl.abort(), timeoutMs)
-    try {
-      const res = await fetch(url, { ...init, signal: ctrl.signal })
-      if (!res.ok) {
-        // 202 is OK for POST /generate per contract
-        throw new Error(`Request failed (${res.status})`)
-      }
-      return res
-    } catch (err: any) {
-      if (err?.name === "AbortError") throw new Error("Request timed out")
-      throw err
-    } finally {
-      clearTimeout(id)
+// Debug logging utility for client-side
+const debugLog = {
+  info: (message: string, data?: any) => {
+    if (typeof window !== 'undefined') {
+      console.log(`🔧 [PODCAST-API] ${message}`, data || '');
+    }
+  },
+  error: (message: string, error?: any) => {
+    if (typeof window !== 'undefined') {
+      console.error(`❌ [PODCAST-API] ${message}`, error || '');
+    }
+  },
+  success: (message: string, data?: any) => {
+    if (typeof window !== 'undefined') {
+      console.log(`✅ [PODCAST-API] ${message}`, data || '');
+    }
+  },
+  warn: (message: string, data?: any) => {
+    if (typeof window !== 'undefined') {
+      console.warn(`⚠️ [PODCAST-API] ${message}`, data || '');
     }
   }
+};
+
+const createHttpApi = (useMock: boolean = false): PodcastApi => {
+  const baseUrl = 'http://localhost:8000/api/v1';
+  const endpoint = useMock ? 'mock' : '';
+  
+  debugLog.info(`Creating HTTP API client`, { baseUrl, useMock, endpoint });
 
   return {
-    async generate(body) {
-      const res = await fetchWithTimeout(`${BASE_URL}/api/generate`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-      })
-      const data = (await res.json()) as { jobId: string }
-      if (!data?.jobId) throw new Error("Invalid response from server")
-      return data
-    },
-    async getProgress(jobId) {
-      const res = await fetchWithTimeout(`${BASE_URL}/api/progress/${encodeURIComponent(jobId)}`)
-      return (await res.json()) as ProgressResponse
-    },
-    async getResult(jobId) {
-      const res = await fetchWithTimeout(`${BASE_URL}/api/result/${encodeURIComponent(jobId)}`)
-      return (await res.json()) as ResultResponse
-    },
-    async cancel(jobId) {
-      const res = await fetchWithTimeout(`${BASE_URL}/api/cancel/${encodeURIComponent(jobId)}`, {
-        method: "POST",
-      })
-      return (await res.json()) as { ok: true }
-    },
-  }
-}
+    generate: async (request: PodcastRequest): Promise<GenerateResponse> => {
+      debugLog.info('Starting podcast generation request', request);
+      
+      try {
+        const url = `${baseUrl}/${endpoint}${endpoint ? '/' : ''}generate`;
+        
+        // For real backend, we need additional fields
+        const payload = useMock ? request : {
+          topic: request.topic,
+          description: "",
+          tone: "neutral" as const,
+          length: 10 as const
+        };
+        
+        debugLog.info('Making POST request', { url, payload });
+        
+        const response = await fetch(url, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(payload),
+        });
 
-// In-memory mock that simulates progress and a final result
-function createMockApi(): ApiClient {
-  type MockJob = {
-    id: string
-    createdAt: number
-    canceled: boolean
-    stage: number
-    percent: number
-    log: string[]
-    title?: string
-    done?: boolean
-    error?: string
-  }
+        debugLog.info('Response received', { 
+          status: response.status, 
+          ok: response.ok,
+          headers: Object.fromEntries(response.headers.entries())
+        });
 
-  const jobs = new Map<string, MockJob>()
-
-  const STAGES = [
-    "Sharpening pencils…",
-    "Picking the best news from the web",
-    "Skimming so you don’t have to",
-    "Checking what the hotshots have to say about this",
-    "Connecting the dots",
-    "Adding dramatic pauses (tastefully)",
-    "Finding the right voice",
-    "Laying down a smooth bed",
-    "Dialing in the vibes to −16 LUFS",
-    "Pressing the big red Export button",
-    "All set. Ready when you are.",
-  ]
-
-  const interval = 1000
-
-  // simple ticker
-  const ensureTicker = () => {
-    if ((ensureTicker as any)._timer) return
-    ;(ensureTicker as any)._timer = setInterval(() => {
-      const now = Date.now()
-      for (const job of jobs.values()) {
-        if (job.canceled || job.done || job.error) continue
-        // advance stage and percent
-        const inc = 8 + Math.floor(Math.random() * 12)
-        job.percent = Math.min(98, job.percent + inc)
-        if (Math.random() < 0.6) {
-          job.log.push(randomLog())
-          job.log = job.log.slice(-120)
+        if (!response.ok) {
+          const errorText = await response.text();
+          debugLog.error('Error response received', { status: response.status, body: errorText });
+          throw new Error(`HTTP ${response.status}: ${errorText}`);
         }
-        if (job.percent >= (job.stage + 1) * (100 / STAGES.length)) {
-          job.stage = Math.min(STAGES.length - 1, job.stage + 1)
-        }
-        // finish after ~12-18s
-        if (now - job.createdAt > 12000 && Math.random() < 0.4) {
-          job.percent = 100
-          job.stage = STAGES.length - 1
-          job.done = true
-          job.title = job.title || "Daily Briefing — " + new Date().toLocaleDateString()
-        }
-      }
-    }, interval)
-  }
 
-  function randomLog() {
-    const msgs = [
-      "Gathering headlines",
-      "Summarizing key points",
-      "Pulling expert quotes",
-      "Removing filler words",
-      "Mixing in ambience",
-      "Balancing EQ",
-      "Converting text to speech",
-      "Exporting MP3",
-    ]
-    return msgs[Math.floor(Math.random() * msgs.length)]
-  }
-
-  return {
-    async generate(body) {
-      const id = Math.random().toString(36).slice(2, 10)
-      const job: MockJob = {
-        id,
-        createdAt: Date.now(),
-        stage: 0,
-        percent: 3,
-        log: ["Job accepted", `Topic: ${body.topic}`, `Tone: ${body.tone}, Length: ${body.length}m`],
-        canceled: false,
-        done: false,
-        title: `“${body.topic}”`,
-      }
-      jobs.set(id, job)
-      ensureTicker()
-      await delay(300) // feel responsive
-      return { jobId: id }
-    },
-    async getProgress(jobId) {
-      await delay(150)
-      const job = jobs.get(jobId)
-      if (!job) throw new Error("Job not found")
-      if (job.canceled) {
-        return {
-          stage: job.stage,
-          message: "Canceled",
-          percent: job.percent,
-          log: job.log,
+        const result = await response.json();
+        debugLog.success('Generate request successful', result);
+        
+        // Validate that we got an ID
+        if (!result.id) {
+          debugLog.error('No ID in generate response', result);
+          throw new Error('Invalid response: missing job ID');
         }
-      }
-      return {
-        stage: job.stage,
-        message: STAGES[job.stage] || "Working…",
-        percent: job.percent,
-        log: job.log,
-      }
-    },
-    async getResult(jobId) {
-      await delay(200)
-      const job = jobs.get(jobId)
-      if (!job) throw new Error("Job not found")
-      if (job.canceled) {
-        return { status: "error", error: "Job canceled" }
-      }
-      if (job.error) {
-        return { status: "error", error: job.error }
-      }
-      if (!job.done) {
-        return { status: "running" }
-      }
-      return {
-        status: "ready",
-        title: job.title,
-        mp3Url: "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3",
-        notesUrl: "https://example.com",
-        durationSeconds: 60 * 10,
-        metrics: {
-          sourcesKept: 3,
-          sources: [
-            { title: "TechCrunch - Latest AI developments", url: "https://techcrunch.com/ai" },
-            { title: "MIT Technology Review - AI Safety Report", url: "https://technologyreview.com/ai-safety" },
-            { title: "OpenAI Blog - Recent Updates", url: "https://openai.com/blog" },
-          ],
-          lufs: -16,
-          ttsSeconds: 42,
-          runtimeSeconds: Math.floor((Date.now() - job.createdAt) / 1000),
-        },
+        
+        debugLog.info('Returning generate response', { id: result.id });
+        return { id: result.id };
+      } catch (error) {
+        debugLog.error('Generate request failed', { 
+          error: error instanceof Error ? error.message : String(error),
+          type: typeof error 
+        });
+        throw error;
       }
     },
-    async cancel(jobId) {
-      await delay(200)
-      const job = jobs.get(jobId)
-      if (job) {
-        job.canceled = true
-      }
-      return { ok: true }
-    },
-  }
-}
 
-function delay(ms: number) {
-  return new Promise((res) => setTimeout(res, ms))
-}
+    getResult: async (id: string): Promise<ResultResponse> => {
+      debugLog.info('Getting result', { jobId: id });
+      
+      // Validate input
+      if (!id || id === 'undefined' || id === 'null') {
+        debugLog.error('Invalid job ID provided', { id });
+        throw new Error(`Invalid job ID: ${id}`);
+      }
+      
+      try {
+        const url = `${baseUrl}/${endpoint}${endpoint ? '/' : ''}result/${id}`;
+        debugLog.info('Making GET request', { url });
+        
+        const response = await fetch(url);
+        
+        debugLog.info('Result response received', { 
+          status: response.status, 
+          ok: response.ok 
+        });
+
+        if (!response.ok) {
+          const errorText = await response.text();
+          debugLog.error('Result error response', { status: response.status, body: errorText });
+          throw new Error(`HTTP ${response.status}: ${errorText}`);
+        }
+
+        debugLog.info('API Response details', { 
+          status: response.status, 
+          headers: response.headers,
+          url: response.url 
+        });
+        
+        const resultResponse: ResultResponse = await response.json();
+        debugLog.info('Result response data', resultResponse);
+        
+        // Fallback: If job is completed but audio_url is missing, construct it manually
+        if (resultResponse.status === 'completed' && !resultResponse.audio_url && resultResponse.id) {
+          debugLog.info('Job completed but missing audio_url, constructing fallback URLs');
+          const baseUrl = 'http://localhost:8000';
+          resultResponse.audio_url = `${baseUrl}/api/v1/static/podcasts/podcast_${resultResponse.id}.mp3`;
+          
+          // Also try to construct transcript URL if missing
+          if (!resultResponse.transcript) {
+            try {
+              const scriptResponse = await fetch(`${baseUrl}/api/v1/static/scripts/script_${resultResponse.id}.txt`);
+              if (scriptResponse.ok) {
+                resultResponse.transcript = await scriptResponse.text();
+                debugLog.info('Successfully fetched transcript from file');
+              }
+            } catch (error) {
+              debugLog.warn('Could not fetch transcript file', { error });
+            }
+          }
+          
+          // Construct basic metrics if missing
+          if (!resultResponse.metrics && resultResponse.transcript) {
+            const wordCount = resultResponse.transcript.split(/\s+/).length;
+            const estimatedDuration = (wordCount / 150) * 60; // 150 WPM
+            
+            resultResponse.metrics = {
+              duration_seconds: estimatedDuration,
+              word_count: wordCount,
+              average_speaking_rate: 150
+            };
+            debugLog.info('Constructed fallback metrics', resultResponse.metrics);
+          }
+          
+          debugLog.info('Fallback URLs constructed', { 
+            audio_url: resultResponse.audio_url,
+            has_transcript: !!resultResponse.transcript,
+            has_metrics: !!resultResponse.metrics
+          });
+        }
+        
+        return resultResponse;
+      } catch (error) {
+        debugLog.error('Get result request failed', { 
+          error: error instanceof Error ? error.message : String(error),
+          type: typeof error,
+          jobId: id
+        });
+        throw error;
+      }
+    },
+  };
+};
+
+export const createPodcastApi = (useMock: boolean = false): PodcastApi => {
+  debugLog.info('Creating podcast API client', { useMock });
+  return createHttpApi(useMock);
+};
+
+// Export debug utilities for use in components
+export { debugLog };
